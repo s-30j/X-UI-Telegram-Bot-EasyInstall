@@ -264,30 +264,65 @@ function loginToXui($url, $u, $p) {
 
 function findClient($url, $cookie, $uuid) {
     $base = rtrim($url, '/');
+    if (substr($base, -6) === '/login') $base = substr($base, 0, -6);
+    
+    // آدرس دقیق API برای دریافت لیست اینباندها
     $apiUrl = $base . '/panel/api/inbounds/list';
+    
     $ch = curl_init($apiUrl);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_COOKIE, $cookie);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true); // اضافه شدن برای هندل کردن مسیرهای دارای Path
+    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+    curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36");
+    
     $res = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    if ($httpCode == 302 || $httpCode == 401) return "LOGIN_REQUIRED";
+    curl_close($ch);
+
+    // اگر کوکی منقضی شده باشد یا دسترسی رد شود
+    if ($httpCode == 302 || $httpCode == 401 || empty($res)) return "LOGIN_REQUIRED";
+    
     $json = json_decode($res, true);
-    if (!isset($json['obj'])) return null;
+    
+    // بررسی اینکه آیا پاسخ معتبر است
+    if (!isset($json['obj']) || !is_array($json['obj'])) return null;
+
     foreach ($json['obj'] as $inbound) {
-        $clients = json_decode($inbound['settings'], true)['clients'] ?? [];
+        $settings = json_decode($inbound['settings'], true);
+        $clients = $settings['clients'] ?? [];
+        
         foreach ($clients as $c) {
-            if (($c['id'] ?? $c['password'] ?? '') == $uuid) {
-                $email = $c['email'];
-                $up = 0; $down = 0;
-                if (isset($inbound['clientStats'])) {
-                    foreach ($inbound['clientStats'] as $s) {
-                        if ($s['email'] == $email) { $up = $s['up']; $down = $s['down']; break; }
+            // بررسی تطابق UUID با دقت بالا (پشتیبانی از Vless, Vmess, Trojan)
+            $clientId = $c['id'] ?? $c['password'] ?? '';
+            
+            if (trim($clientId) == trim($uuid)) {
+                $up = 0; $down = 0; $email = $c['email'] ?? 'بدون نام';
+                
+                // استخراج آمار مصرف (در برخی پنل‌ها در clientStats است)
+                if (isset($inbound['clientStats']) && is_array($inbound['clientStats'])) {
+                    foreach ($inbound['clientStats'] as $stat) {
+                        if ($stat['email'] == $email) {
+                            $up = $stat['up'] ?? 0;
+                            $down = $stat['down'] ?? 0;
+                            break;
+                        }
                     }
                 }
-                return ['email'=>$email,'up'=>$up,'down'=>$down,'total'=>$c['totalGB'],'expiryTime'=>$c['expiryTime'],'enable'=>$c['enable']];
+                
+                // بازگشت اطلاعات کامل
+                return [
+                    'email' => $email,
+                    'up' => $up,
+                    'down' => $down,
+                    'total' => $c['totalGB'] ?? 0,
+                    'expiryTime' => $c['expiryTime'] ?? 0,
+                    'enable' => $c['enable'] ?? true
+                ];
             }
         }
     }
-    return null;
+    return null; // اگر در این پنل پیدا نشد
 }
