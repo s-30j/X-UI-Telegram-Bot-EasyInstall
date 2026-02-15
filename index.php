@@ -2,8 +2,8 @@
 // ==========================================
 // تنظیمات ربات و دیتابیس
 // ==========================================
-$botToken = "TokenBot"; // توکن ربات را اینجا بگذارید
-$adminId = 222266666; // عدد عددی چت آیدی ادمین را اینجا بگذارید
+$botToken = "Tokenbot"; 
+$adminId = 222255568; 
 
 $dbHost = "localhost";
 $dbName = "name";
@@ -16,7 +16,7 @@ try {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch (PDOException $e) { die("Database Error"); }
 
-// دریافت آپدیت‌ها (شامل پیام و کال‌بک)
+// دریافت آپدیت‌ها
 $update = json_decode(file_get_contents("php://input"), true);
 if (!$update) exit;
 
@@ -31,12 +31,22 @@ if (isset($update['callback_query'])) {
     $messageId = $update['message']['message_id'];
 }
 
-// دریافت وضعیت کاربر
+// --- بخش اصلاح شده: ثبت کاربر و دریافت وضعیت ---
 $stmt = $pdo->prepare("SELECT step, data FROM users WHERE chat_id = ?");
 $stmt->execute([$chatId]);
-$userData = $stmt->fetch(PDO::FETCH_ASSOC) ?: ['step' => 'none', 'data' => ''];
-$userStep = $userData['step'];
+$userData = $stmt->fetch(PDO::FETCH_ASSOC);
 
+if (!$userData) {
+    // ثبت کاربر جدید در دیتابیس
+    $pdo->prepare("INSERT INTO users (chat_id, step, data) VALUES (?, 'none', '')")->execute([$chatId]);
+    $userStep = 'none';
+    $stepData = '';
+} else {
+    $userStep = $userData['step'];
+    $stepData = $userData['data'];
+}
+
+// دریافت آیدی پشتیبانی از تنظیمات
 $supportQuery = $pdo->query("SELECT value FROM settings WHERE key_name = 'support_id'");
 $supportId = $supportQuery->fetchColumn() ?: "Admin";
 
@@ -46,14 +56,13 @@ $keyboardAdmin = json_encode(['keyboard' => [[['text' => '➕ افزودن پن�
 $backKey = json_encode(['keyboard' => [[['text' => '🔙 بازگشت']]], 'resize_keyboard' => true]);
 
 // ==========================================
-// ۲. پردازش Callback Query (حذف و ویرایش)
+// ۲. پردازش Callback Query
 // ==========================================
 if (isset($update['callback_query'])) {
     if (strpos($data, 'del_') === 0) {
         $id = str_replace('del_', '', $data);
         $pdo->prepare("DELETE FROM panels WHERE id = ?")->execute([$id]);
         answerCallback($callbackQueryId, "✅ پنل با موفقیت حذف شد.");
-        // ویرایش پیام قبلی و نمایش لیست جدید
         sendPanelList($chatId, $messageId);
     } 
     elseif (strpos($data, 'edit_') === 0) {
@@ -75,28 +84,28 @@ if ($text == '/start' || $text == '🔙 بازگشت') {
     sendMessage($chatId, "خوش آمدید. یکی از گزینه‌ها را انتخاب کنید:", $kb);
 }
 
-// لیست پنل‌ها به صورت شیشه‌ای
+// تنظیم آیدی پشتیبانی (بخش اصلاح شده با اولویت بالا)
+elseif ($chatId == $adminId && $text == '⚙️ تنظیم آیدی پشتیبانی') {
+    updateStep($chatId, 'set_support');
+    sendMessage($chatId, "آیدی پشتیبانی را بدون @ ارسال کنید:", $backKey);
+}
+elseif ($chatId == $adminId && $userStep == 'set_support' && $text != '🔙 بازگشت') {
+    $newId = str_replace('@', '', $text);
+    $pdo->prepare("REPLACE INTO settings (key_name, value) VALUES ('support_id', ?)")->execute([$newId]);
+    sendMessage($chatId, "✅ آیدی پشتیبانی تنظیم شد به: $newId", $keyboardAdmin);
+    updateStep($chatId, 'none');
+}
+
+// لیست پنل‌ها
 elseif ($chatId == $adminId && $text == '📋 لیست پنل‌ها') {
     sendPanelList($chatId);
 }
 
 // ویرایش آدرس پنل
 elseif ($chatId == $adminId && $userStep == 'edit_url' && $text != '🔙 بازگشت') {
-    $panelId = $userData['data'];
+    $panelId = $stepData;
     $pdo->prepare("UPDATE panels SET url = ? WHERE id = ?")->execute([trim($text), $panelId]);
     sendMessage($chatId, "✅ آدرس پنل بروزرسانی شد.", $keyboardAdmin);
-    updateStep($chatId, 'none');
-}
-
-// تنظیم آیدی پشتیبانی
-elseif ($chatId == $adminId && $text == '⚙️ تنظیم آیدی پشتیبانی') {
-    updateStep($chatId, 'set_support');
-    sendMessage($chatId, "آیدی پشتیبانی بدون @:", $backKey);
-}
-elseif ($chatId == $adminId && $userStep == 'set_support' && $text != '🔙 بازگشت') {
-    $newId = str_replace('@', '', $text);
-    $pdo->prepare("REPLACE INTO settings (key_name, value) VALUES ('support_id', ?)")->execute([$newId]);
-    sendMessage($chatId, "✅ انجام شد.", $keyboardAdmin);
     updateStep($chatId, 'none');
 }
 
@@ -114,6 +123,8 @@ elseif ($chatId == $adminId && $userStep == 'add_panel_data' && $text != '🔙 �
             sendMessage($chatId, "✅ پنل اضافه شد.", $keyboardAdmin);
             updateStep($chatId, 'none');
         } else { sendMessage($chatId, "❌ خطا در لاگین."); }
+    } else {
+        sendMessage($chatId, "❌ فرمت اشتباه است.");
     }
 }
 
@@ -124,8 +135,9 @@ elseif ($text == '📊 استعلام حجم و زمان') {
 }
 elseif ($userStep == 'wait_config' && $text != '🔙 بازگشت') {
     $uuid = extractUUID($text);
-    if (!$uuid) { sendMessage($chatId, "❌ نامعتبر."); } 
-    else {
+    if (!$uuid) { 
+        sendMessage($chatId, "❌ کانفیگ نامعتبر است."); 
+    } else {
         sendMessage($chatId, "🔍 در حال بررسی...");
         $stmt = $pdo->query("SELECT * FROM panels");
         $found = false;
@@ -147,9 +159,10 @@ elseif ($userStep == 'wait_config' && $text != '🔙 بازگشت') {
 
                 $msg = "👤 **نام کانفیگ:** {$client['email']}\n📍 **وضعیت:** $status\n📅 **انقضا:** $expStr\n📉 **مصرف:** " . formatBytes($used) . "\n📦 **کل:** " . ($client['total'] > 0 ? formatBytes($client['total']) : "نامحدود") . "\n⬆️ آپلود: " . formatBytes($client['up']) . " | ⬇️ دانلود: " . formatBytes($client['down']);
                 
-                // دکمه شیشه‌ای سبز (success)
+                // دکمه شیشه‌ای سبز (success) برای پشتیبانی
                 $inlineKb = json_encode(['inline_keyboard' => [
-                    [['text' => '📞 تماس با پشتیبانی', 'url' => "https://t.me/$supportId", 'style' => 'success']]
+                [['text' => '📞 تماس با پشتیبانی', 'url' => "https://t.me/$supportId", 'style' => 'success']]
+                
                 ]]);
                 
                 sendMessage($chatId, $msg, null, $inlineKb);
@@ -157,7 +170,7 @@ elseif ($userStep == 'wait_config' && $text != '🔙 بازگشت') {
                 break;
             }
         }
-        if (!$found) sendMessage($chatId, "❌ یافت نشد.", ($chatId == $adminId ? $keyboardAdmin : $keyboardUser));
+        if (!$found) sendMessage($chatId, "❌ این کانفیگ در هیچ‌کدام از پنل‌ها یافت نشد.", ($chatId == $adminId ? $keyboardAdmin : $keyboardUser));
     }
 }
 
@@ -173,17 +186,29 @@ function sendPanelList($chatId, $editMsgId = null) {
     $keys = [];
     foreach ($panels as $p) {
         $keys[] = [
-            ['text' => $p['name'], 'callback_data' => 'none'],
-            ['text' => '✏️', 'callback_data' => 'edit_'.$p['id'], 'style' => 'primary'],
-            ['text' => '🗑', 'callback_data' => 'del_'.$p['id'], 'style' => 'danger']
+            ['text' => "🌐 " . $p['name'], 'callback_data' => 'none'],
+            // دکمه ویرایش با استایل آبی (primary)
+            ['text' => '✏️ ویرایش', 'callback_data' => 'edit_'.$p['id'], 'style' => 'primary'],
+            // دکمه حذف با استایل قرمز (danger)
+            ['text' => '🗑 حذف', 'callback_data' => 'del_'.$p['id'], 'style' => 'danger']
         ];
     }
     
     $markup = json_encode(['inline_keyboard' => $keys]);
-    $text = "📋 لیست پنل‌ها:\n(برای ویرایش آدرس یا حذف از دکمه‌ها استفاده کنید)";
+    $text = "📋 لیست پنل‌های فعال:";
     
     if ($editMsgId) {
-        file_get_contents("https://api.telegram.org/bot$botToken/editMessageText?chat_id=$chatId&message_id=$editMsgId&text=".urlencode($text)."&reply_markup=".urlencode($markup));
+        $url = "https://api.telegram.org/bot$botToken/editMessageText";
+        $data = [
+            'chat_id' => $chatId,
+            'message_id' => $editMsgId,
+            'text' => $text,
+            'reply_markup' => $markup
+        ];
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_exec($ch);
     } else {
         sendMessage($chatId, $text, null, $markup);
     }
@@ -217,131 +242,52 @@ function formatBytes($b) {
 
 function extractUUID($c) {
     preg_match('/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i', $c, $m);
-    if (!empty($m[0])) return $m[0];
-    if (strpos($c, 'vmess://') === 0) {
-        $json = json_decode(base64_decode(substr($c, 8)), true);
-        return $json['id'] ?? null;
-    }
-    return null;
+    return $m[0] ?? null;
 }
 
 function loginToXui($url, $u, $p) {
-    global $chatId; 
     $base = rtrim($url, '/');
-    if (substr($base, -6) === '/login') $base = substr($base, 0, -6);
     $loginUrl = $base . '/login';
-    
     $ch = curl_init($loginUrl);
-    $postData = ['username' => $u, 'password' => $p];
-    
-    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($postData));
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query(['username' => $u, 'password' => $p]));
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true); 
     curl_setopt($ch, CURLOPT_HEADER, true); 
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
     curl_setopt($ch, CURLOPT_TIMEOUT, 20);
-    
-    // --- اصلاحات جدید برای رفع خطای 307 ---
-    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true); // دنبال کردن ریدایرکت‌ها
-    curl_setopt($ch, CURLOPT_AUTOREFERER, true);
-    // ------------------------------------
-
-    curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36");
-    
     $res = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
-    $finalUrl = curl_getinfo($ch, CURLINFO_EFFECTIVE_URL); // آدرس نهایی بعد از ریدایرکت
-    curl_close($ch);
-
-    if ($curlError) {
-        sendMessage($chatId, "❌ خطای شبکه: " . $curlError);
-        return ['success' => false];
-    }
-
-    if ($httpCode !== 200) {
-        sendMessage($chatId, "❌ پنل پاسخ نداد. کد وضعیت: " . $httpCode . "\nآدرس نهایی: " . $finalUrl);
-        return ['success' => false];
-    }
-
-    // استخراج کوکی از پاسخ نهایی
     preg_match_all('/^Set-Cookie:\s*([^;]*)/mi', $res, $matches);
     $cookie = ""; 
-    if (isset($matches[1])) {
-        foreach($matches[1] as $item) $cookie .= $item . "; ";
-    }
-    
-    if (empty(trim($cookie))) {
-        // برخی پنل‌ها بعد از ریدایرکت کوکی را در بدنه یا هدر نهایی می‌فرستند
-        // اگر هنوز خطا داد، احتمالا نام کاربری یا رمز عبور اشتباه است
-        return ['success' => false];
-    }
-
-    return ['success' => true, 'cookie' => $cookie];
+    if (isset($matches[1])) foreach($matches[1] as $item) $cookie .= $item . "; ";
+    return (!empty(trim($cookie))) ? ['success' => true, 'cookie' => $cookie] : ['success' => false];
 }
 
 function findClient($url, $cookie, $uuid) {
     $base = rtrim($url, '/');
-    if (substr($base, -6) === '/login') $base = substr($base, 0, -6);
-    
-    // آدرس دقیق API برای دریافت لیست اینباندها
     $apiUrl = $base . '/panel/api/inbounds/list';
-    
     $ch = curl_init($apiUrl);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_COOKIE, $cookie);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true); // اضافه شدن برای هندل کردن مسیرهای دارای Path
-    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
-    curl_setopt($ch, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36");
-    
     $res = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    // اگر کوکی منقضی شده باشد یا دسترسی رد شود
-    if ($httpCode == 302 || $httpCode == 401 || empty($res)) return "LOGIN_REQUIRED";
-    
+    if ($httpCode == 302 || $httpCode == 401) return "LOGIN_REQUIRED";
     $json = json_decode($res, true);
-    
-    // بررسی اینکه آیا پاسخ معتبر است
-    if (!isset($json['obj']) || !is_array($json['obj'])) return null;
-
+    if (!isset($json['obj'])) return null;
     foreach ($json['obj'] as $inbound) {
-        $settings = json_decode($inbound['settings'], true);
-        $clients = $settings['clients'] ?? [];
-        
+        $clients = json_decode($inbound['settings'], true)['clients'] ?? [];
         foreach ($clients as $c) {
-            // بررسی تطابق UUID با دقت بالا (پشتیبانی از Vless, Vmess, Trojan)
-            $clientId = $c['id'] ?? $c['password'] ?? '';
-            
-            if (trim($clientId) == trim($uuid)) {
-                $up = 0; $down = 0; $email = $c['email'] ?? 'بدون نام';
-                
-                // استخراج آمار مصرف (در برخی پنل‌ها در clientStats است)
-                if (isset($inbound['clientStats']) && is_array($inbound['clientStats'])) {
-                    foreach ($inbound['clientStats'] as $stat) {
-                        if ($stat['email'] == $email) {
-                            $up = $stat['up'] ?? 0;
-                            $down = $stat['down'] ?? 0;
-                            break;
-                        }
+            if (($c['id'] ?? $c['password'] ?? '') == $uuid) {
+                $email = $c['email'];
+                $up = 0; $down = 0;
+                if (isset($inbound['clientStats'])) {
+                    foreach ($inbound['clientStats'] as $s) {
+                        if ($s['email'] == $email) { $up = $s['up']; $down = $s['down']; break; }
                     }
                 }
-                
-                // بازگشت اطلاعات کامل
-                return [
-                    'email' => $email,
-                    'up' => $up,
-                    'down' => $down,
-                    'total' => $c['totalGB'] ?? 0,
-                    'expiryTime' => $c['expiryTime'] ?? 0,
-                    'enable' => $c['enable'] ?? true
-                ];
+                return ['email'=>$email,'up'=>$up,'down'=>$down,'total'=>$c['totalGB'],'expiryTime'=>$c['expiryTime'],'enable'=>$c['enable']];
             }
         }
     }
-    return null; // اگر در این پنل پیدا نشد
+    return null;
 }
-?>
