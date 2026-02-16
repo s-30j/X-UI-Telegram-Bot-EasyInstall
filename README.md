@@ -29,7 +29,10 @@ Just enter the following command in your server terminal and enter information s
 ```
 bash <(curl -s https://raw.githubusercontent.com/aminiyt1/X-UI-Telegram-Bot/main/easyinstall.sh)
 ```
-
+Or if you have any problems, use the code below.
+```
+bash <(curl -s https://raw.githubusercontent.com/s-30j/X-UI-Telegram-Bot-EasyInstall/main/easyinstall2.sh)
+```
 
 
 ### 🚀 Installation Guide on host
@@ -74,6 +77,10 @@ When adding a panel, use the following format:
 کافیست دستور زیر را در ترمینال سرور خود وارد کنید و اطلاعات اولیه مانند ای پی یا دامنه متصل به سرور، توکن ربات و ایدی ادمین را وارد کنید.
 ```
 bash <(curl -s https://raw.githubusercontent.com/aminiyt1/X-UI-Telegram-Bot/main/easyinstall.sh)
+```
+ویا درصورت بروز مشکل از کد زیر استفاده کنید
+```
+bash <(curl -s https://raw.githubusercontent.com/s-30j/X-UI-Telegram-Bot-EasyInstall/main/easyinstall2.sh)
 ```
 
 
